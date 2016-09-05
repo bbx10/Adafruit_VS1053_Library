@@ -34,6 +34,13 @@ static void feeder(void) {
 #define VS1053_CONTROL_SPI_SETTING  SPISettings(250000,  MSBFIRST, SPI_MODE0)
 #define VS1053_DATA_SPI_SETTING     SPISettings(8000000, MSBFIRST, SPI_MODE0)
 
+// Uncomment only *ONE*. Or comment out all for no patches.
+// If a file does not play correctly, try the standard patches.
+#include "vs1053b-patches.plg"            // Standard
+//#include "vs1053b-patches-dsd.plg"
+//#include "vs1053b-patches-flac.plg"     // with FLAC
+//#include "vs1053b-patches-flac-latm.plg"
+//#include "vs1053b-patches-latm.plg"
 
 static const uint8_t dreqinttable[] = {
 #if defined(__AVR_ATmega168__) || defined(__AVR_ATmega328P__) || defined (__AVR_ATmega328__) || defined(__AVR_ATmega8__) 
@@ -105,16 +112,26 @@ boolean Adafruit_VS1053_FilePlayer::useInterrupt(uint8_t type) {
 #endif
   }
   if (type == VS1053_FILEPLAYER_PIN_INT) {
+#if defined(NOT_AN_INTERRUPT) && defined(digitalPinToInterrupt)
+    int intNum = digitalPinToInterrupt(_dreq);
+    if (intNum == NOT_AN_INTERRUPT) return false;
+    #if defined(SPI_HAS_TRANSACTION) && !defined(ESP8266)
+    SPI.usingInterrupt(intNum);
+    attachInterrupt(intNum, feeder, CHANGE);
+    #endif
+    return true;
+#else
     for (uint8_t i=0; i<sizeof(dreqinttable); i+=2) {
       //Serial.println(dreqinttable[i]);
       if (_dreq == dreqinttable[i]) {
-        #ifdef SPI_HAS_TRANSACTION
+        #if defined(SPI_HAS_TRANSACTION) && !defined(ESP8266)
         SPI.usingInterrupt(dreqinttable[i+1]);
-        #endif
 	attachInterrupt(dreqinttable[i+1], feeder, CHANGE);
+        #endif
 	return true;
       }
     }
+#endif
   }
   return false;
 }
@@ -195,6 +212,10 @@ void Adafruit_VS1053_FilePlayer::pausePlaying(boolean pause) {
   }
 }
 
+boolean Adafruit_VS1053_FilePlayer::playing(void) {
+  return (playingMusic && currentTrack);
+}
+
 boolean Adafruit_VS1053_FilePlayer::paused(void) {
   return (!playingMusic && currentTrack);
 }
@@ -240,7 +261,7 @@ void Adafruit_VS1053_FilePlayer::feedBuffer(void) {
   static uint8_t running = 0;
   uint8_t sregsave;
 
-#if !defined (__SAM3X8E__) && !defined (ARDUINO_ARCH_SAMD)
+#if !defined (__SAM3X8E__) && !defined (ARDUINO_ARCH_SAMD) && !defined(ESP8266)
   // Do not allow 2 copies of this code to run concurrently.
   // If an interrupt causes feedBuffer() to run while another
   // copy of feedBuffer() is already running in the main
@@ -256,7 +277,7 @@ void Adafruit_VS1053_FilePlayer::feedBuffer(void) {
     SREG = sregsave;
   }
 #endif
-    
+
   if (! playingMusic) {
     running = 0;
     return; // paused or stopped
@@ -294,7 +315,7 @@ void Adafruit_VS1053_FilePlayer::feedBuffer(void) {
 /***************************************************************/
 
 /* VS1053 'low level' interface */
-#ifdef ARDUINO_ARCH_SAMD
+#if defined(ARDUINO_ARCH_SAMD) || defined(ESP8266)
 static volatile uint32_t *clkportreg, *misoportreg, *mosiportreg;
 static uint32_t clkpin, misopin, mosipin;
 #else
@@ -338,7 +359,7 @@ Adafruit_VS1053::Adafruit_VS1053(int8_t rst, int8_t cs, int8_t dcs, int8_t dreq)
 void Adafruit_VS1053::applyPatch(const uint16_t *patch, uint16_t patchsize) {
   uint16_t i = 0;
 
- // Serial.print("Patch size: "); Serial.println(patchsize);
+  //Serial.print("Patch size: "); Serial.println(patchsize);
   while ( i < patchsize ) {
     uint16_t addr, n, val;
 
@@ -346,7 +367,7 @@ void Adafruit_VS1053::applyPatch(const uint16_t *patch, uint16_t patchsize) {
     n = pgm_read_word(patch++);
     i += 2;
 
-    //Serial.println(addr, HEX);
+    //Serial.print(addr, HEX); Serial.print(','); Serial.println(n, HEX);
     if (n & 0x8000U) { // RLE run, replicate n samples 
       n &= 0x7FFF;
       val = pgm_read_word(patch++);
@@ -483,6 +504,11 @@ void Adafruit_VS1053::reset() {
   sciWrite(VS1053_REG_CLOCKF, 0x6000);
 
   setVolume(40, 40);
+
+#ifdef PLUGIN_SIZE
+  /* Now it's time to load the proper patch set. */
+  applyPatch((const uint16_t *)plugin, PLUGIN_SIZE);
+#endif
 }
 
 uint8_t Adafruit_VS1053::begin(void) {
