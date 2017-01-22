@@ -94,10 +94,7 @@ void setup() {
 }
 
 void loop() {
-  // File is playing in the background
-  if (musicPlayer.playing()) {
-    musicPlayer.feedBuffer();
-  }
+  musicPlayer.feedBuffer();
   if (Serial.available()) {
     char c = Serial.read();
 

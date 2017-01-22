@@ -152,13 +152,9 @@ class Adafruit_VS1053_FilePlayer : public Adafruit_VS1053 {
   boolean startPlayingFile(const char *trackname);
   boolean playFullFile(const char *trackname);
   void stopPlaying(void);
-  boolean playing(void);
   boolean paused(void);
   boolean stopped(void);
   void pausePlaying(boolean pause);
-
- private:
-  uint8_t _cardCS;
 };
 
 #endif // ADAFRUIT_VS1053_H
